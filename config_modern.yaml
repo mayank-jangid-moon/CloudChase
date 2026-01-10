@@ -1,0 +1,143 @@
+# Data Configuration - LEAKAGE-FREE TEMPORAL SPLITS
+data:
+  data_dir: "${oc.env:DATA_DIR,/teamspace/studios/this_studio/MOSDAC}"
+  test_data_dir: "${oc.env:TEST_DATA_DIR,/teamspace/studios/this_studio/TESTING}"
+  eval_output_dir: "${oc.env:EVAL_OUTPUT_DIR,/teamspace/studios/this_studio/EVAL}"
+
+  # STRICT TEMPORAL SPLITS (NO LEAKAGE)
+  train_months: ['mar', 'apr', 'may']  # Training: March + April + May
+  val_months: ['may']                  # Validation: May (subset of training)
+  test_months: ['jun']                 # Test: June ONLY
+
+  # NEW: Single-frame PT file configuration (MANDATORY REQUIREMENTS)
+  image_size: 720               # MANDATORY: 720x720 resolution
+  sequence_length: 8            # MANDATORY: 8 input frames (4 hours)
+  forecast_length: 4            # MANDATORY: 4 target frames (2 hours)
+  temporal_stride: 6            # MODERATE: Stride 6 for balanced overlap and memory
+  cache_gb: 70                  # ULTRA-MASSIVE: 70GB cache for ultimate SSD→RAM performance
+  preload_all_frames: true      # SMART: Pre-load all individual frames into RAM before training
+
+  # Data format optimization (Analysis recommendation)
+  preferred_format: 'hdf5'      # hdf5, zarr, or tensor
+  use_memory_mapping: true
+  cache_preprocessed: true
+
+# Model Architecture
+model:
+  # UNet Configuration
+  in_channels: 5
+  out_channels: 5
+  base_channels: 32
+  channel_multipliers: [1, 2, 4, 6, 8]  # [32, 64, 128, 192, 256]
+  temporal_depth: 8
+  
+  # Modern Architecture Features (Analysis recommendations)
+  use_attention_gates: true
+  use_hierarchical_recurrence: true  # ConvLSTM in decoder only
+  norm_type: 'group'  # group, batch, layer
+  activation_type: 'gelu'  # gelu, relu, leaky_relu, silu
+  upsampling_method: 'trilinear_conv'  # Better than ConvTranspose3d
+  
+  # Memory Optimizations
+  use_gradient_checkpointing: true
+  use_mixed_precision: true
+  compile_model: true
+
+# Training Configuration
+training:
+  # Basic Training
+  epochs: 100
+  batch_size: 1  # Memory-optimized for 720x720
+  accumulation_steps: 4
+  
+  # Learning Rate & Optimization
+  learning_rate: 1.0e-4
+  weight_decay: 0.01
+  optimizer: 'adamw'
+  
+  # Advanced LR Scheduling (Analysis recommendation)
+  scheduler:
+    type: 'sequential'  # warmup + cosine + plateau
+    warmup_epochs: 3
+    cosine_t0: 15
+    plateau_patience: 5
+    plateau_factor: 0.5
+  
+  # Loss Function (Multi-component as recommended)
+  loss:
+    mse_weight: 1.0
+    perceptual_weight: 0.2
+    gradient_weight: 0.15
+    brightness_weight: 0.1
+    physics_weight_range: [0.02, 0.08]  # Adaptive
+  
+  # Evaluation
+  eval_every: 5
+  test_eval_every: 10
+  save_every: 10
+  
+  # Performance Targets
+  target_psnr: 32.5
+  target_ssim: 0.89
+  continue_after_target: true
+
+# Data Loading Optimization (Analysis recommendation)
+dataloader:
+  num_workers: 8
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+  multiprocessing_context: 'spawn'
+  drop_last: true
+
+# Hardware Optimization
+hardware:
+  # GPU Configuration
+  device: 'cuda'
+  mixed_precision: true
+  compile_backend: 'inductor'
+  
+  # Memory Management
+  memory_fraction: 0.95
+  empty_cache_every: 50
+  gradient_clip_norm: 1.0
+  
+  # Tensor Core Optimizations
+  enable_tensor_cores: true
+  allow_tf32: true
+  cudnn_benchmark: true
+
+# Monitoring & Logging
+monitoring:
+  log_every: 10
+  save_samples: true
+  track_gradients: false
+  profile_memory: false
+  
+  # Weights & Biases (optional)
+  use_wandb: false
+  wandb_project: "satellite_nowcasting"
+  wandb_entity: null
+
+# Paths (Environment variable support)
+paths:
+  checkpoint_dir: "${oc.env:CHECKPOINT_DIR,./checkpoints}"
+  log_dir: "${oc.env:LOG_DIR,./logs}"
+  output_dir: "${oc.env:OUTPUT_DIR,./output}"
+
+# Experimental Features
+experimental:
+  use_flash_attention: false
+  use_xformers: false
+  use_deepspeed: false
+  
+# Hydra Configuration
+defaults:
+  - _self_
+
+hydra:
+  run:
+    dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ./multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra:job.num}
