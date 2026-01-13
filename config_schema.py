@@ -9,11 +9,13 @@ Features:
 - Automatic validation and error reporting
 """
 
-from typing import List, Optional, Union, Literal
-from pydantic import BaseModel, Field, validator
-from dataclasses import dataclass
-import os
+import logging
+from typing import List, Optional, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class DataConfig(BaseModel):
@@ -42,12 +44,13 @@ class DataConfig(BaseModel):
     use_memory_mapping: bool = Field(default=True)
     cache_preprocessed: bool = Field(default=True)
     
-    @validator('data_dir', 'test_data_dir', 'eval_output_dir')
+    @field_validator('data_dir', 'test_data_dir', 'eval_output_dir')
+    @classmethod
     def validate_paths(cls, v):
         """Validate that paths exist or can be created"""
         path = Path(v)
         if not path.exists():
-            print(f"Warning: Path {v} does not exist")
+            logger.warning("Configured path does not exist: %s", v)
         return str(path.absolute())
 
 
@@ -87,7 +90,8 @@ class LossConfig(BaseModel):
     brightness_weight: float = Field(default=0.1, ge=0.0, le=1.0)
     physics_weight_range: List[float] = Field(default=[0.02, 0.08])
     
-    @validator('physics_weight_range')
+    @field_validator('physics_weight_range')
+    @classmethod
     def validate_weight_range(cls, v):
         if len(v) != 2 or v[0] >= v[1]:
             raise ValueError("physics_weight_range must be [min, max] with min < max")
@@ -159,12 +163,11 @@ class PathsConfig(BaseModel):
     log_dir: str = Field(default="./logs")
     output_dir: str = Field(default="./output")
     
-    @validator('*')
-    def create_directories(cls, v):
-        """Create directories if they don't exist"""
-        path = Path(v)
-        path.mkdir(parents=True, exist_ok=True)
-        return str(path.absolute())
+    @field_validator('*')
+    @classmethod
+    def normalize_directories(cls, v):
+        """Normalize configured output directories without creating them during validation."""
+        return str(Path(v).absolute())
 
 
 class ExperimentalConfig(BaseModel):
@@ -174,7 +177,6 @@ class ExperimentalConfig(BaseModel):
     use_deepspeed: bool = Field(default=False)
 
 
-@dataclass
 class SatCastConfig(BaseModel):
     """
     COMPLETE CONFIGURATION SCHEMA WITH PYDANTIC VALIDATION
@@ -189,11 +191,11 @@ class SatCastConfig(BaseModel):
     paths: PathsConfig = Field(default_factory=PathsConfig)
     experimental: ExperimentalConfig = Field(default_factory=ExperimentalConfig)
     
-    class Config:
-        """Pydantic configuration"""
-        validate_assignment = True
-        extra = "forbid"
-        use_enum_values = True
+    model_config = ConfigDict(
+        validate_assignment=True,
+        extra="forbid",
+        use_enum_values=True,
+    )
 
 
 def load_config_from_yaml(yaml_path: str) -> SatCastConfig:

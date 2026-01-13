@@ -217,17 +217,12 @@ if is_master and __name__ == "__main__":
 def load_modern_config():
     """
     Load configuration using modern YAML + Pydantic system
-    Falls back to legacy CONFIG if modern system unavailable
+    Falls back to legacy CONFIG only when the modern config dependencies are unavailable.
     """
     try:
-        # Try to load modern configuration
         from config_loader import load_config_with_overrides
-        from config_schema import SatCastConfig
 
-        # Load with any command-line overrides
         modern_config = load_config_with_overrides()
-
-        # Convert to legacy format for compatibility
         legacy_config = convert_modern_to_legacy_config(modern_config)
 
         print("Using modern YAML + Pydantic configuration system")
@@ -240,9 +235,7 @@ def load_modern_config():
         print("Using legacy CONFIG for now")
         return LEGACY_CONFIG, None
     except Exception as e:
-        print(f"Error loading modern config: {e}")
-        print("Falling back to legacy CONFIG")
-        return LEGACY_CONFIG, None
+        raise RuntimeError(f"Modern configuration is invalid: {e}") from e
 
 def convert_modern_to_legacy_config(modern_config) -> dict:
     """Convert modern Pydantic config to legacy dict format"""

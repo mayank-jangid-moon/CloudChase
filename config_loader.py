@@ -1,13 +1,12 @@
-import os
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional
+
 import hydra
-from hydra import compose, initialize
-from hydra.core.config_store import ConfigStore
+from hydra import compose, initialize, initialize_config_dir
 from omegaconf import DictConfig, OmegaConf
 import logging
 
-from config_schema import SatCastConfig, DataConfig, ModelConfig, TrainingConfig
+from config_schema import SatCastConfig
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,21 +19,19 @@ class ConfigManager:
     """
     
     def __init__(self):
-        self.config_store = ConfigStore.instance()
         self._register_configs()
     
     def _register_configs(self):
-        """Register Pydantic schemas with Hydra ConfigStore"""
-        self.config_store.store(name="base_config", node=SatCastConfig)
-        
-        self.config_store.store(group="data", name="base", node=DataConfig)
-        self.config_store.store(group="model", name="base", node=ModelConfig)
-        self.config_store.store(group="training", name="base", node=TrainingConfig)
-    
-    def load_config(self, 
-                   config_path: Optional[str] = None,
-                   config_name: str = "config_modern",
-                   overrides: Optional[list] = None) -> SatCastConfig:
+        """Hydra composes YAML; Pydantic validates the composed result."""
+        return None
+
+    def load_config(
+        self,
+        config_path: Optional[str] = None,
+        config_name: str = "config_modern",
+        overrides: Optional[list] = None,
+        fallback_to_default: bool = False,
+    ) -> SatCastConfig:
         """
         Load configuration with Hydra + Pydantic validation
         
@@ -42,32 +39,44 @@ class ConfigManager:
             config_path: Path to config directory (None for current dir)
             config_name: Name of config file (without .yaml)
             overrides: List of config overrides (e.g., ["model.base_channels=64"])
+            fallback_to_default: Return default config on load failure when True.
             
         Returns:
             Validated SatCastConfig instance
         """
         try:
-            if config_path is None:
-                config_path = str(Path(__file__).parent)
-            
-            with initialize(config_path=config_path, version_base=None):
+            config_path_obj = Path(config_path) if config_path else Path(__file__).parent
+            config_path_obj = config_path_obj.expanduser()
+
+            if config_path_obj.is_absolute():
+                config_context = initialize_config_dir(
+                    config_dir=str(config_path_obj),
+                    version_base=None,
+                )
+            else:
+                config_context = initialize(
+                    config_path=str(config_path_obj),
+                    version_base=None,
+                )
+
+            with config_context:
                 cfg = compose(config_name=config_name, overrides=overrides or [])
-                
                 cfg_dict = OmegaConf.to_container(cfg, resolve=True)
-                
                 validated_config = SatCastConfig(**cfg_dict)
-                
+
                 logger.info("Configuration loaded and validated successfully")
                 return validated_config
                 
         except Exception as e:
-            logger.error(f"Configuration loading failed: {e}")
-            logger.info("Falling back to default configuration...")
-            return SatCastConfig()
+            logger.error("Configuration loading failed: %s", e)
+            if fallback_to_default:
+                logger.warning("Using default configuration because fallback_to_default=True")
+                return SatCastConfig()
+            raise
     
     def save_config(self, config: SatCastConfig, output_path: str):
         """Save configuration to YAML file"""
-        config_dict = config.dict()
+        config_dict = config.model_dump() if hasattr(config, "model_dump") else config.dict()
         
         omega_cfg = OmegaConf.create(config_dict)
         
@@ -162,9 +171,15 @@ def create_config_variants():
 config_manager = ConfigManager()
 
 
-def load_config_with_overrides(overrides: Optional[list] = None) -> SatCastConfig:
+def load_config_with_overrides(
+    overrides: Optional[list] = None,
+    fallback_to_default: bool = False,
+) -> SatCastConfig:
     """Convenience function to load config with overrides"""
-    return config_manager.load_config(overrides=overrides)
+    return config_manager.load_config(
+        overrides=overrides,
+        fallback_to_default=fallback_to_default,
+    )
 
 
 def load_config_variant(variant: str) -> SatCastConfig:

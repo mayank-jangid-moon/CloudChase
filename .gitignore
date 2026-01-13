@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+outputs/
+multirun/
+checkpoints/
+logs/
+output/
+predictions/
+preprocessed/
+benchmark/
+*.pth
+*.pt
+*.h5
+*.hdf5
+*.zarr/

@@ -13,8 +13,8 @@ import warnings
 warnings.filterwarnings('ignore')
 
 try:
-    from skimage.metrics import structural_similarity as ssim
-    from skimage.metrics import peak_signal_noise_ratio as psnr
+    from skimage.metrics import structural_similarity as skimage_ssim
+    from skimage.metrics import peak_signal_noise_ratio as skimage_psnr
     METRICS_AVAILABLE = True
 except ImportError:
     print("scikit-image not available. SSIM/PSNR metrics will be skipped.")
@@ -33,28 +33,31 @@ try:
         get_memory_info,
         cleanup_memory
     )
-    
-    CONFIG, modern_config = load_modern_config()
-    print("Successfully imported model components and loaded configuration from main.py")
-    
-except ImportError as e:
-    print(f"Could not import model components: {e}")
-    print("Make sure main.py is in the same directory.")
-    exit(1)
 
-ENHANCED_CONFIG = {
-    'in_channels': CONFIG.get('in_channels', 5),
-    'out_channels': CONFIG.get('in_channels', 5),
-    'input_frames': CONFIG.get('sequence_length', 8),
-    'output_frames': CONFIG.get('forecast_length', 4),
-    'sequence_length': CONFIG.get('sequence_length', 8),
-    'forecast_length': CONFIG.get('forecast_length', 4),
-    'input_size': CONFIG.get('image_size', 720),
-    'base_channels': 32,
-    'channel_names': CONFIG.get('channel_names', ['VIS', 'WV', 'SWIR', 'TIR1', 'TIR2']),
-    'channel_weights': [1.0, 1.2, 1.0, 1.1, 1.1],
-    'data_range': 2.0,
-}
+except ImportError as e:
+    raise ImportError("Could not import model components. Make sure unet.py is available.") from e
+
+
+DEFAULT_CHANNEL_NAMES = ['VIS', 'WV', 'SWIR', 'TIR1', 'TIR2']
+DEFAULT_CHANNEL_WEIGHTS = [1.0, 1.2, 1.0, 1.1, 1.1]
+
+
+def build_inference_config(config: Optional[Dict] = None) -> Dict:
+    """Build inference defaults from validated training config or a checkpoint config."""
+    config = config or {}
+    return {
+        'in_channels': config.get('in_channels', 5),
+        'out_channels': config.get('out_channels', config.get('in_channels', 5)),
+        'input_frames': config.get('input_frames', config.get('sequence_length', 8)),
+        'output_frames': config.get('output_frames', config.get('forecast_length', 4)),
+        'sequence_length': config.get('sequence_length', config.get('input_frames', 8)),
+        'forecast_length': config.get('forecast_length', config.get('output_frames', 4)),
+        'input_size': config.get('input_size', config.get('image_size', 720)),
+        'base_channels': config.get('base_channels', 32),
+        'channel_names': config.get('channel_names', DEFAULT_CHANNEL_NAMES),
+        'channel_weights': config.get('channel_weights', DEFAULT_CHANNEL_WEIGHTS),
+        'data_range': config.get('data_range', 2.0),
+    }
 
 class EnhancedSatelliteInference:
     """
@@ -69,15 +72,16 @@ class EnhancedSatelliteInference:
     - Direct UNet prediction (no diffusion)
     """
 
-    def __init__(self, model_path: str, device: str = 'cuda'):
+    def __init__(self, model_path: str, device: str = 'cuda', config: Optional[Dict] = None):
         self.device = device
         self.model = None
         self.config = None
         self.loss_fn = None
+        self.default_config = build_inference_config(config)
 
         self.load_model(model_path)
 
-        self.loss_fn = SatCastLoss(device=self.device)
+        self.loss_fn = SatCastLoss(device=self.device, channel_config=self.config)
         
     def load_model(self, model_path: str):
         """Load trained model from checkpoint with enhanced architecture support"""
@@ -89,10 +93,10 @@ class EnhancedSatelliteInference:
         checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
 
         if 'config' in checkpoint:
-            self.config = {**ENHANCED_CONFIG, **checkpoint['config']}
+            self.config = {**self.default_config, **checkpoint['config']}
             print("Loaded configuration from checkpoint and merged with enhanced defaults")
         else:
-            self.config = ENHANCED_CONFIG.copy()
+            self.config = self.default_config.copy()
             print("Using enhanced default configuration (config not found in checkpoint)")
 
         print(f"Model Configuration:")
@@ -643,8 +647,10 @@ Examples:
     print("Starting Enhanced Satellite Forecasting Inference")
     print("=" * 60)
 
+    CONFIG, _ = load_modern_config()
+
     # Initialize enhanced inference engine
-    inference = EnhancedSatelliteInference(args.model, args.device)
+    inference = EnhancedSatelliteInference(args.model, args.device, config=CONFIG)
     
     # Load input sequence
     if args.sequence_files:

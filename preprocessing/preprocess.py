@@ -1,7 +1,7 @@
-import h5py
+from __future__ import annotations
+
+import argparse
 import numpy as np
-import torch
-import torch.nn.functional as F
 import glob
 import os
 import logging
@@ -9,22 +9,44 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
 import warnings
-from tqdm import tqdm
 import gc
-import psutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing as mp
+
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = None
+
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
+try:
+    import h5py
+except ImportError:
+    h5py = None
+
+try:
+    import torch
+    import torch.nn.functional as F
+except ImportError:
+    torch = None
+    F = None
 
 warnings.filterwarnings('ignore')
 
 class UltraFastConfig:
-    """Ultra-optimized configuration for Mac Mini M4 (10 cores, 16GB RAM)"""
-    # FIXED Paths for your 35GB dataset
-    HDF5_DIR: str = '/media/mayank/ExtHDD/ISRO_BAH/dataset/INSAT-3DS/JUN25/ASIA_MER'  # Your H5 files directory with 1,440 files
-    OUTPUT_DIR: str = 'preprocessed'  # Your output directory
+    """Configuration for converting INSAT HDF5 frames into single-frame PT files."""
+    HDF5_DIR: str = os.environ.get('HDF5_DIR', '')
+    OUTPUT_DIR: str = os.environ.get('PREPROCESS_OUTPUT_DIR', 'preprocessed')
     
     # Channel selection (5 key channels only)
-    SELECTED_CHANNELS: List[str] = ['VIS', 'WV', 'SWIR', 'TIR1', 'TIR2']
+    SELECTED_CHANNELS: List[str] = os.environ.get(
+        'PREPROCESS_CHANNELS',
+        'VIS,WV,SWIR,TIR1,TIR2'
+    ).split(',')
     
     # FIXED Channel configurations based on actual INSAT L1C H5 structure
     CHANNEL_CONFIGS: Dict[str, Dict] = {
@@ -80,9 +102,9 @@ class UltraFastConfig:
     FORECAST_FRAMES: int = 4
     TOTAL_SEQUENCE_LENGTH: int = 12
     
-    # Processing parameters optimized for Mac Mini M4
+    # Processing parameters
     TARGET_RESOLUTION: tuple = (720, 720)
-    MAX_WORKERS: int = 8  # Optimal for M4 (10 cores - 2 for system)
+    MAX_WORKERS: int = int(os.environ.get('PREPROCESS_MAX_WORKERS', '8'))
     NATIVE_RESOLUTION: tuple = (1616, 1737)  # INSAT-3DS native resolution
     
     # Ultra-fast mode flags
@@ -100,6 +122,24 @@ if not config.NO_LOGGING:
 else:
     logger = logging.getLogger()
     logger.disabled = True
+
+
+def ensure_preprocessing_dependencies():
+    missing = []
+    if h5py is None:
+        missing.append("h5py")
+    if torch is None:
+        missing.append("torch")
+    if tqdm is None:
+        missing.append("tqdm")
+    if psutil is None:
+        missing.append("psutil")
+    if missing:
+        raise ImportError(
+            "Missing preprocessing dependencies: "
+            + ", ".join(missing)
+            + ". Install them with `pip install -r requirements.txt`."
+        )
 
 def fast_extract_channel(hdf5_file: h5py.File, channel_name: str) -> Optional[np.ndarray]:
     """FIXED channel extraction - prioritize direct raw data for reliability"""
@@ -588,11 +628,60 @@ def test_fixed_extraction():
         print(f"❌ Test failed: {e}")
         return False
 
-if __name__ == '__main__':
-    import sys
 
-    if len(sys.argv) > 1 and sys.argv[1] == '--test':
-        # Test mode
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Preprocess INSAT HDF5 frames into single-frame PyTorch files."
+    )
+    parser.add_argument(
+        "--input",
+        default=config.HDF5_DIR,
+        help="Directory containing INSAT HDF5 files. Can also be set with HDF5_DIR.",
+    )
+    parser.add_argument(
+        "--output",
+        default=config.OUTPUT_DIR,
+        help="Directory for generated frame_YYYYMMDD_HHMM.pt files.",
+    )
+    parser.add_argument(
+        "--channels",
+        nargs="+",
+        default=config.SELECTED_CHANNELS,
+        choices=sorted(config.CHANNEL_CONFIGS.keys()),
+        help="Satellite channels to extract, in output tensor order.",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=config.MAX_WORKERS,
+        help="Number of parallel worker processes.",
+    )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Run channel extraction against the first HDF5 file without writing outputs.",
+    )
+    return parser.parse_args()
+
+
+def apply_cli_overrides(args):
+    if not args.input:
+        raise ValueError("Input directory is required. Pass --input or set HDF5_DIR.")
+    if args.workers < 1:
+        raise ValueError("--workers must be at least 1")
+
+    config.HDF5_DIR = args.input
+    config.OUTPUT_DIR = args.output
+    config.SELECTED_CHANNELS = args.channels
+    config.MAX_WORKERS = args.workers
+
+
+if __name__ == '__main__':
+    args = parse_args()
+    apply_cli_overrides(args)
+    ensure_preprocessing_dependencies()
+
+    if args.test:
         test_success = test_fixed_extraction()
         if test_success:
             print(f"\n🎉 PREPROCESSING SCRIPT FIX VERIFIED!")
@@ -601,5 +690,4 @@ if __name__ == '__main__':
             print(f"\n❌ Fix verification failed")
             print(f"🔧 Please check the channel extraction logic")
     else:
-        # Normal processing mode
         main_single_frame_processing()

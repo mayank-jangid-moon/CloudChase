@@ -151,6 +151,7 @@ Following the machine learning principle of simplicity, we achieved near state-o
 ```
 CloudChase/
 ├── assets/                      # Output visualizations and images
+├── ARCHITECTURE.md              # Pipeline and file responsibility map
 ├── preprocessing/               # Data preprocessing modules
 │   ├── preprocess.py           # Main preprocessing pipeline
 │   └── regrid_insat.py         # INSAT data regridding utilities
@@ -159,6 +160,7 @@ CloudChase/
 ├── config_schema.py            # Pydantic validation schemas
 ├── data_format_optimizer.py    # HDF5/Zarr optimization utilities
 ├── inference.py                # Inference engine with visualization
+├── requirements.txt            # Python dependency manifest
 ├── unet.py                     # Main UNet model implementation
 └── README.md                   # Project documentation
 ```
@@ -190,7 +192,7 @@ scipy>=1.10.0
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/CloudChase.git
+git clone https://github.com/mayank-jangid-moon/CloudChase.git
 cd CloudChase
 
 # Install dependencies
